@@ -75,6 +75,35 @@ userId.set(2);
 console.log(formState().name); // "User 2" (Reset to computed value)
 ```
 
+## Utilities
+
+### `untracked<T>`
+
+Wraps a function execution to prevent any signals read within it from being tracked as dependencies. This is useful when you want to read a signal's value inside a `computed` or `linkedSignal` without re-evaluating when that signal changes.
+
+```typescript
+import { signal, computed, untracked } from '@illuma/signals';
+
+const user = signal("Alice");
+const timer = signal(0);
+
+const notification = computed(() => {
+  // `timer` is tracked
+  const t = timer();
+  
+  // `user` is read, but NOT tracked
+  const u = untracked(() => user());
+  
+  return `${u} has been online for ${t} seconds`;
+});
+
+// `timer` changes will update `notification`, but `user` changes will NOT
+notification.subscribe((value) => {
+  console.log("Notification updated:", value);
+});
+
+```
+
 ## Integration
 
 ### Creating a React Hook
