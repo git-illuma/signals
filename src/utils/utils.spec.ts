@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { signal } from "../signal/signal";
-import { isSignal } from "./utils";
 import { computed } from "../computed/computed";
 import { linkedSignal } from "../linked/linked";
+import { signal } from "../signal/signal";
+import { isSignal } from "./utils";
 
 describe("Utils", () => {
   describe("isSignal", () => {

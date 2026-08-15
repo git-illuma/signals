@@ -1,12 +1,15 @@
-import { SignalContext } from "../context";
-import type {
-  iComputedSignalState,
-  iSignalOptions,
-  iSignalStateSymb,
-  ReadonlySignal,
-} from "../types";
+import {
+  commitRecompute,
+  createRxNode,
+  livenessChanged,
+  runTracked,
+  trackRead,
+  updateIfNecessary,
+} from "../graph";
+import type { iSignalOptions, iSignalStateSymb, ReadonlySignal } from "../types";
 import { SIGNAL_SYMBOL } from "../types";
 import { defaultEqual } from "../utils/utils";
+import type { iComputedSignalState } from "./types";
 
 /**
  * Creates a computed signal that derives its value from other signals.
@@ -26,7 +29,11 @@ import { defaultEqual } from "../utils/utils";
  * console.log(doubleCount()); // 2
  * ```
  *
- * The computed signal will only recompute its value when one of its dependencies changes, and it will use the provided equality function to determine if the new value is different from the old value before notifying listeners.
+ * Dependencies are re-discovered on every recomputation, so a computation that
+ * reads a different signal on a later run keeps tracking the branch it actually
+ * took. The computation itself is lazy: it does not run until the value is read
+ * or subscribed to, and its result is cached until one of its dependencies
+ * reports a new version.
  */
 export function computed<T>(
   computation: () => T,
@@ -34,30 +41,38 @@ export function computed<T>(
 ): ReadonlySignal<T> {
   const equal = opts?.equal ?? defaultEqual;
 
+  const rx = createRxNode(true);
   const _state: iComputedSignalState<T> = {
-    value: computation(),
+    value: undefined as T,
     listeners: new Set(),
-    cleanups: new Set(),
-    deps: SignalContext.scan(computation),
+
+    trackers: new Set(),
+    track: (obs) => _state.trackers.add(obs),
+
+    rx,
   };
 
-  const passUpdate = () => {
-    if (_state.listeners.size === 0) return;
+  let initialized = false;
 
-    const next = computation();
+  rx.listenerCount = () => _state.listeners.size;
+  rx.emit = () => {
+    for (const l of Array.from(_state.listeners)) l(_state.value);
+  };
+  rx.recompute = () => {
     const prev = _state.value;
+    const { value: next, producers } = runTracked(computation);
+
     _state.value = next;
 
-    if (equal(prev, next)) return;
-    for (const l of _state.listeners) l(_state.value);
+    const changed = !initialized || !equal(prev, next);
+    initialized = true;
+
+    commitRecompute(rx, producers, changed);
   };
 
   const signalRef = (() => {
-    if (SignalContext.isContextOpen) SignalContext.register(signalRef);
-    if (_state.listeners.size === 0) {
-      const next = computation();
-      _state.value = next;
-    }
+    updateIfNecessary(rx);
+    trackRead(rx);
 
     return _state.value;
   }) as ReadonlySignal<T> & iSignalStateSymb<T>;
@@ -66,25 +81,26 @@ export function computed<T>(
 
   Object.defineProperty(signalRef, "subscribe", {
     value: (listener: (val: T) => void) => {
-      if (_state.listeners.size === 0) {
-        for (const caller of _state.deps) {
-          const cleanupFn = caller.subscribe(passUpdate);
-          _state.cleanups.add(cleanupFn);
-        }
-
-        const next = computation();
-        _state.value = next;
-        listener(next);
-      }
-
       _state.listeners.add(listener);
+      livenessChanged(rx);
+      updateIfNecessary(rx);
+
+      // Before the trackers: a tracker may write into the graph (that is how
+      // `resource` starts loading), and this listener must still see the state
+      // that was current when it subscribed rather than only the aftermath.
+      listener(_state.value);
+
+      const trackerCleanups: (() => void)[] = [];
+      for (const tracker of _state.trackers) {
+        const cleanupFn = tracker(listener);
+        trackerCleanups.push(cleanupFn);
+      }
 
       return () => {
         _state.listeners.delete(listener);
-        if (_state.listeners.size === 0) {
-          for (const cleanupFn of _state.cleanups) cleanupFn();
-          _state.cleanups.clear();
-        }
+        livenessChanged(rx);
+
+        for (const cleanupFn of trackerCleanups) cleanupFn();
       };
     },
   });

@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { computed, linkedSignal, signal } from "../index";
+import { extractState } from "../utils/utils";
 
 describe("linkedSignal", () => {
   it("should update linked signal correctly", () => {
@@ -192,5 +193,50 @@ describe("linkedSignal", () => {
     expect(spy).toHaveBeenCalledTimes(1);
 
     unsub();
+  });
+
+  it("should produce readonly signal that reflects current value", () => {
+    const root = signal("initial");
+    const linked = linkedSignal(() => `${root()} linked`);
+    const readonlySig = linked.asReadonly();
+
+    const listener = vi.fn();
+    const unsub = readonlySig.subscribe(listener);
+
+    expect(readonlySig).not.toHaveProperty("set");
+    expect(readonlySig).not.toHaveProperty("update");
+
+    root.set("updated");
+    expect(listener).toHaveBeenCalledWith("updated linked");
+
+    root.update((prev) => `${prev} value`);
+    expect(listener).toHaveBeenCalledWith("updated value linked");
+
+    linked.set("manually set");
+    expect(listener).toHaveBeenCalledWith("manually set");
+
+    unsub();
+  });
+
+  it("should allow tracking listeners", () => {
+    const original = signal(0);
+    const sig = linkedSignal(() => original() * 2);
+    const listener1 = vi.fn();
+    const listener2 = vi.fn();
+    const cleanup = vi.fn();
+    const tracker = vi.fn().mockImplementation(() => cleanup);
+    const state = extractState(sig);
+
+    state.track(tracker);
+
+    const unsubs = [];
+    unsubs.push(sig.subscribe(listener1));
+    expect(tracker).toHaveBeenCalledWith(listener1);
+
+    unsubs.push(sig.subscribe(listener2));
+    expect(tracker).toHaveBeenCalledWith(listener2);
+
+    for (const unsub of unsubs) unsub();
+    expect(cleanup).toHaveBeenCalledTimes(2);
   });
 });

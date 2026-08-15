@@ -1,4 +1,15 @@
-export const SIGNAL_SYMBOL = Symbol("illuma-state-signal");
+import type { iRxNode } from "./graph";
+
+/**
+ * Registered on the global symbol registry on purpose. This package can end up
+ * duplicated in a dependency tree (two versions, or a bundler that inlines it
+ * into several chunks), and a plain `Symbol()` would give each copy its own
+ * brand — `isSignal` would then reject a perfectly good signal that happened to
+ * be created by the other copy.
+ */
+export const SIGNAL_SYMBOL: unique symbol = Symbol.for(
+  "@illuma/signals/StateSymbol",
+) as never;
 
 /**
  * Defines an equality function for signals.
@@ -31,13 +42,23 @@ export type ReadonlySignal<T> = (() => T) & {
   readonly subscribe: (listener: (val: T) => void) => () => void;
 };
 
+/** @internal */
+export type iSignalObserver = (listener: (...args: any) => void) => () => void;
+
+/** @internal */
+export interface iSignalTrackerState {
+  readonly trackers: Set<iSignalObserver>;
+  readonly track: (obs: iSignalObserver) => void;
+}
+
 /**
  * @internal
  * Represents the internal state of a readonly signal, including its current value and listeners.
  */
-export interface iReadonlySignalState<T> {
+export interface iReadonlySignalState<T> extends iSignalTrackerState {
   value: T;
   readonly listeners: Set<(val: T) => void>;
+  readonly rx: iRxNode;
 }
 
 /**
@@ -58,46 +79,15 @@ export type WritableSignal<T> = ReadonlySignal<T> & {
    * Will also use the equality function to determine if the new value is different from the current value before notifying listeners.
    */
   readonly update: (fn: (prev: T) => T) => void;
+
+  /**
+   * Creates a readonly version of the signal that can be passed around without exposing the ability to modify it.
+   * The readonly signal will reflect changes made to the original signal, but will not allow direct updates.
+   */
+  readonly asReadonly: () => ReadonlySignal<T>;
 };
 
-/**
- * @internal
- * Represents the internal state of a computed signal,
- * which includes its current value, listeners, dependencies,
- * and cleanup functions.
- */
-export interface iComputedSignalState<T> extends iReadonlySignalState<T> {
-  readonly deps: Set<ReadonlySignal<unknown>>;
-  readonly cleanups: Set<() => void>;
-}
-
-/**
- * A signal that derives its value from other signals based on `computation` and can also be updated directly.
- * When the value is set directly, it will be challenged against an equality function
- * to determine if the update should trigger listeners.
- */
-export type LinkedSignal<K, T = K> = WritableSignal<T>;
-
-/** @internal */
-export type LinkedSignalArg<K, T> = iLinkedSignalWithComputation<K, T> | (() => K);
-
-/**
- * Explicit configuration for creating a linked signal with a custom computation function.
- * This allows you to specify a source signal, a computation function that derives the linked signal's value from the source signal,
- * and an optional equality function to control when updates should trigger.
- */
-export interface iLinkedSignalWithComputation<K, T> {
-  /** Any signal to derive the value from */
-  readonly source: ReadonlySignal<K>;
-  /** Function to compute the linked signal's value based on the source signal's value and previous state */
-  readonly computation: (srcVal: K, prev: { source: K; prevValue: T } | undefined) => T;
-  /** Optional equality function to determine if the linked signal's value has changed */
-  readonly equal?: (prev: T, next: T) => boolean;
-}
-
-/**
- * @internal
- * Represents the internal state of a linked signal, which extends the computed signal state.
- * It includes the current value, listeners, dependencies, and cleanup functions.
- */
-export interface iLinkedSignalState<T> extends iComputedSignalState<T> {}
+export * from "./computed/types";
+export * from "./external/types";
+export * from "./linked/types";
+export * from "./resource/types";

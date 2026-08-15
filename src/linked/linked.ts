@@ -1,14 +1,23 @@
-import { SignalContext } from "../context";
+import { computed } from "../computed/computed";
+import {
+  commitRecompute,
+  createRxNode,
+  livenessChanged,
+  propagate,
+  runTracked,
+  runUntracked,
+  trackRead,
+  updateIfNecessary,
+} from "../graph";
 import type {
   iLinkedSignalState,
   iLinkedSignalWithComputation,
-  iSignalStateSymb,
   LinkedSignal,
   LinkedSignalArg,
-  ReadonlySignal,
-} from "../types";
+} from "../linked/types";
+import type { iSignalStateSymb } from "../types";
 import { SIGNAL_SYMBOL } from "../types";
-import { defaultEqual, isSignal } from "../utils/utils";
+import { defaultEqual } from "../utils/utils";
 
 /**
  * Creates a linked signal that derives its value from another signal or a computation.
@@ -63,111 +72,111 @@ export function linkedSignal<K, T = K>(arg: LinkedSignalArg<K, T>): LinkedSignal
   let equal = defaultEqual<T>;
 
   let srcFn: () => K;
-  let sources: Set<ReadonlySignal<K>>;
   let computation: (srcVal: K, prev: { source: K; prevValue: T } | undefined) => T;
 
   if (typeof arg === "function") {
-    if (isSignal(arg)) {
-      srcFn = () => arg();
-      sources = new Set([arg as ReadonlySignal<K>]);
-      computation = (srcVal) => srcVal as unknown as T;
-    } else {
-      srcFn = () => arg();
-      sources = SignalContext.scan(arg);
-      computation = () => arg() as unknown as T;
-    }
+    srcFn = () => arg();
+    computation = (srcVal) => srcVal as unknown as T;
   } else {
     srcFn = arg.source;
     computation = arg.computation;
-    sources = new Set([arg.source]);
     equal = arg.equal ?? defaultEqual;
   }
 
+  const rx = createRxNode(true);
   const _state: iLinkedSignalState<T> = {
-    value: computation(srcFn(), undefined),
+    value: undefined as T,
     listeners: new Set(),
-    cleanups: new Set(),
-    deps: sources,
+
+    trackers: new Set(),
+    track: (t) => _state.trackers.add(t),
+
+    rx,
+  };
+
+  let initialized = false;
+
+  rx.listenerCount = () => _state.listeners.size;
+  rx.emit = () => {
+    for (const l of Array.from(_state.listeners)) l(_state.value);
+  };
+  rx.recompute = () => {
+    const prev = _state.value;
+    const { value: next, producers } = runTracked(() => {
+      const sourceVal = srcFn();
+
+      // Only the source is a dependency: the computation is free to read other
+      // signals for context without silently becoming reactive to them.
+      return runUntracked(() =>
+        computation(
+          sourceVal,
+          initialized ? { source: sourceVal, prevValue: prev } : undefined,
+        ),
+      );
+    });
+
+    _state.value = next;
+
+    const changed = !initialized || !equal(prev, next);
+    initialized = true;
+
+    commitRecompute(rx, producers, changed);
   };
 
   const signalRef = (() => {
-    if (SignalContext.isContextOpen) SignalContext.register(signalRef);
-    if (_state.listeners.size === 0) {
-      const sourceVal = srcFn();
-      const next = computation(sourceVal, {
-        source: sourceVal,
-        prevValue: _state.value,
-      });
-      _state.value = next;
-    }
+    updateIfNecessary(rx);
+    trackRead(rx);
 
     return _state.value;
   }) as LinkedSignal<K, T> & iSignalStateSymb<T>;
-
-  const passUpdate = () => {
-    if (_state.listeners.size === 0) return;
-
-    const sourceVal = srcFn();
-    const next = computation(sourceVal, {
-      source: sourceVal,
-      prevValue: _state.value,
-    });
-
-    const prev = _state.value;
-    _state.value = next;
-
-    if (equal(prev, next)) return;
-    for (const l of _state.listeners) l(_state.value);
-  };
 
   Object.defineProperty(signalRef, SIGNAL_SYMBOL, { value: _state });
 
   Object.defineProperty(signalRef, "set", {
     value: (next: T) => {
+      updateIfNecessary(rx);
+
       const prev = _state.value;
       _state.value = next;
 
       if (equal(prev, next)) return;
-      for (const l of _state.listeners) l(next);
+      propagate(rx);
     },
   });
 
   Object.defineProperty(signalRef, "update", {
     value: (fn: (prev: T) => T) => {
-      const prev = _state.value;
-      const next = fn(prev);
+      updateIfNecessary(rx);
+
+      const next = fn(_state.value);
       signalRef.set(next);
     },
   });
 
   Object.defineProperty(signalRef, "subscribe", {
     value: (listener: (val: T) => void) => {
-      if (_state.listeners.size === 0) {
-        for (const caller of _state.deps) {
-          const cleanupFn = caller.subscribe(passUpdate);
-          _state.cleanups.add(cleanupFn);
-        }
-
-        const sourceVal = srcFn();
-        const next = computation(sourceVal, {
-          source: sourceVal,
-          prevValue: _state.value,
-        });
-
-        _state.value = next;
-        listener(next);
-      }
-
       _state.listeners.add(listener);
+      livenessChanged(rx);
+      updateIfNecessary(rx);
+
+      listener(_state.value);
+
+      const trackerCleanups: (() => void)[] = [];
+      for (const tracker of _state.trackers) {
+        trackerCleanups.push(tracker(listener));
+      }
 
       return () => {
         _state.listeners.delete(listener);
-        if (_state.listeners.size === 0) {
-          for (const cleanupFn of _state.cleanups) cleanupFn();
-          _state.cleanups.clear();
-        }
+        livenessChanged(rx);
+
+        for (const cleanupFn of trackerCleanups) cleanupFn();
       };
     },
+  });
+
+  Object.defineProperty(signalRef, "asReadonly", {
+    value: () => computed(() => signalRef()),
   });
 
   Object.freeze(signalRef);

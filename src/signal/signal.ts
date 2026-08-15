@@ -1,4 +1,5 @@
-import { SignalContext } from "../context";
+import { computed } from "../computed/computed";
+import { createRxNode, livenessChanged, propagate, trackRead } from "../graph";
 import type {
   iReadonlySignalState,
   iSignalOptions,
@@ -38,13 +39,24 @@ export function signal<T>(
   opts?: iSignalOptions<T>,
 ): WritableSignal<T | undefined> {
   const equal = opts?.equal ?? defaultEqual;
+  const rx = createRxNode(false);
   const _state: iReadonlySignalState<T | undefined> = {
     value: defaultValue,
     listeners: new Set(),
+
+    trackers: new Set(),
+    track: (t) => _state.trackers.add(t),
+
+    rx,
+  };
+
+  rx.listenerCount = () => _state.listeners.size;
+  rx.emit = () => {
+    for (const l of Array.from(_state.listeners)) l(_state.value);
   };
 
   const signalRef = (() => {
-    if (SignalContext.isContextOpen) SignalContext.register(signalRef);
+    trackRead(rx);
     return _state.value;
   }) as WritableSignal<T | undefined> & iSignalStateSymb<T | undefined>;
 
@@ -56,7 +68,7 @@ export function signal<T>(
       _state.value = value;
 
       if (equal(prev, value)) return;
-      for (const l of _state.listeners) l(value);
+      propagate(rx);
     },
   });
 
@@ -71,8 +83,27 @@ export function signal<T>(
   Object.defineProperty(signalRef, "subscribe", {
     value: (listener: (val: T | undefined) => void) => {
       _state.listeners.add(listener);
-      return () => _state.listeners.delete(listener);
+      livenessChanged(rx);
+
+      listener(_state.value);
+
+      const trackerCleanups: (() => void)[] = [];
+      for (const tracker of _state.trackers) {
+        const cleanupFn = tracker(listener);
+        trackerCleanups.push(cleanupFn);
+      }
+
+      return () => {
+        _state.listeners.delete(listener);
+        livenessChanged(rx);
+
+        for (const cleanupFn of trackerCleanups) cleanupFn();
+      };
     },
+  });
+
+  Object.defineProperty(signalRef, "asReadonly", {
+    value: () => computed(() => signalRef()),
   });
 
   Object.freeze(signalRef);

@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { computed, signal } from "../index";
+import { extractState } from "../utils/utils";
 
 describe("computed", () => {
   it("should compute value based on dependencies", () => {
@@ -45,8 +46,6 @@ describe("computed", () => {
 
     unsub();
   });
-
-
 
   it("should allow nested computed signals", () => {
     const a = signal(1);
@@ -152,7 +151,7 @@ describe("computed", () => {
     const spy = vi.fn(() => a() * 2);
     const doubleA = computed(spy);
 
-    expect(spy).toHaveBeenCalledTimes(2);
+    expect(spy).toHaveBeenCalledTimes(0);
 
     const unsub = doubleA.subscribe(() => {});
     const callsStart = spy.mock.calls.length;
@@ -164,5 +163,27 @@ describe("computed", () => {
 
     a.set(3);
     expect(spy).toHaveBeenCalledTimes(callsStart + 1);
+  });
+
+  it("should allow tracking listeners", () => {
+    const original = signal(0);
+    const sig = computed(() => original() * 2);
+    const listener1 = vi.fn();
+    const listener2 = vi.fn();
+    const cleanup = vi.fn();
+    const tracker = vi.fn().mockImplementation(() => cleanup);
+    const state = extractState(sig);
+
+    state.track(tracker);
+
+    const unsubs = [];
+    unsubs.push(sig.subscribe(listener1));
+    expect(tracker).toHaveBeenCalledWith(listener1);
+
+    unsubs.push(sig.subscribe(listener2));
+    expect(tracker).toHaveBeenCalledWith(listener2);
+
+    for (const unsub of unsubs) unsub();
+    expect(cleanup).toHaveBeenCalledTimes(2);
   });
 });

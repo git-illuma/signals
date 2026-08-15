@@ -1,4 +1,4 @@
-import { SignalContext } from "../context";
+import { runUntracked } from "../graph";
 
 /**
  * Prevents a function from being tracked as a dependency in a computed signal or linked signal.
@@ -6,5 +6,5 @@ import { SignalContext } from "../context";
  * @returns The result of the function execution.
  */
 export function untracked<T>(fn: () => T): T {
-  return SignalContext.execUntracked(fn);
+  return runUntracked(fn);
 }
