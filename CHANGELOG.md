@@ -7,8 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.2] - 2026-08-16
 ### Fixed
-
 - TypeScript consumers on `moduleResolution: node16` can compile against the
   package. The `exports` map pointed `types` at the ESM `.d.ts` for both
   conditions, so the `.d.cts` the build emits and the tarball ships was
@@ -50,4 +50,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   its abort is no longer reported as an error.
 - A `resource` loader resolving `undefined` now reaches the `ready` state.
 
-[Unreleased]: https://github.com/git-illuma/signals/compare/v0.0.1...HEAD
+[Unreleased]: https://github.com/git-illuma/signals/compare/v0.0.2...HEAD
+[0.0.2]: https://github.com/git-illuma/signals/compare/v0.0.1...v0.0.2
