@@ -7,8 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## 0.0.1 - 2026-08-16
 ### Added
-
 - `external` — adopts a reactive source this library does not own (another
   framework's signal, a media query, a storage event) as a first-class node of
   the graph. The source is observed only while something is watching, and
@@ -19,7 +19,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `subscribe` now emits the current value at subscription time.
 
 ### Changed
-
 - Dependencies are re-discovered on every recomputation instead of being
   captured once. A computation that reads a different signal on a later run —
   a conditional branch — now tracks the branch it actually took.
@@ -35,7 +34,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   duplicated copy of this package are still recognised by `isSignal`.
 
 ### Fixed
-
 - A conditional `computed` no longer freezes on the branch taken during its
   first run.
 - A diamond dependency no longer emits a combination of values that never
@@ -44,4 +42,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   its abort is no longer reported as an error.
 - A `resource` loader resolving `undefined` now reaches the `ready` state.
 
-[Unreleased]: https://github.com/git-illuma/signals/compare/HEAD...HEAD
+[Unreleased]: https://github.com/git-illuma/signals/compare/v0.0.1...HEAD
