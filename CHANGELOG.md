@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- TypeScript consumers on `moduleResolution: node16` can compile against the
+  package. The `exports` map pointed `types` at the ESM `.d.ts` for both
+  conditions, so the `.d.cts` the build emits and the tarball ships was
+  unreachable and a CommonJS project got `TS1479` on every import. The two
+  conditions now carry their own types.
+
 ## 0.0.1 - 2026-08-16
 ### Added
 - `external` — adopts a reactive source this library does not own (another
